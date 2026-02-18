@@ -16,8 +16,9 @@ type AccessEntry struct {
 
 // AccessLog appends read-access entries to an append-only JSONL file.
 type AccessLog struct {
-	path string
-	mu   sync.Mutex
+	path     string
+	mu       sync.Mutex
+	OnAccess func(nodeID string, ts time.Time) // optional callback for co-access tracking
 }
 
 // NewAccessLog creates or opens an access log at the given path.
@@ -46,4 +47,11 @@ func (a *AccessLog) Log(nodeID, field string) {
 	}
 	f.Write(append(data, '\n'))
 	f.Close()
+
+	if a.OnAccess != nil {
+		ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		if err == nil {
+			a.OnAccess(nodeID, ts)
+		}
+	}
 }

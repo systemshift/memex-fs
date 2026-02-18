@@ -10,14 +10,22 @@ import (
 	"time"
 )
 
+const (
+	coAccessWindow = 5 * time.Minute
+	coChangeWindow = 1 * time.Hour
+)
+
 // Repository is the top-level facade for the Merkle DAG store.
 type Repository struct {
-	root    string
-	Store   *ObjectStore
-	Refs    *RefStore
-	Links   *LinkIndex
-	Search  *SearchIndex
-	Commits *CommitLog
+	root        string
+	Store       *ObjectStore
+	Refs        *RefStore
+	Links       *LinkIndex
+	Search      *SearchIndex
+	Commits     *CommitLog
+	CoAccess    *CoAccessIndex
+	CoChange    *CoChangeIndex
+	Relatedness *RelatednessIndex
 }
 
 // OpenRepository opens or creates a repository at the given path.
@@ -64,13 +72,25 @@ func OpenRepository(root string) (*Repository, error) {
 	search := NewSearchIndex()
 	commits := NewCommitLog(filepath.Join(mxDir, "HEAD"), store)
 
+	// Build advisory indexes (failures are warnings, not fatal)
+	accessLogPath := filepath.Join(mxDir, "access.jsonl")
+	coAccess := NewCoAccessIndex(accessLogPath, coAccessWindow)
+
+	coChange := NewCoChangeIndex(commits, coChangeWindow)
+	coChange.Build()
+
+	relatedness := NewRelatednessIndex(coAccess, coChange)
+
 	repo := &Repository{
-		root:    root,
-		Store:   store,
-		Refs:    refs,
-		Links:   links,
-		Search:  search,
-		Commits: commits,
+		root:        root,
+		Store:       store,
+		Refs:        refs,
+		Links:       links,
+		Search:      search,
+		Commits:     commits,
+		CoAccess:    coAccess,
+		CoChange:    coChange,
+		Relatedness: relatedness,
 	}
 
 	// Rebuild search index from all refs

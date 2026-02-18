@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -44,6 +45,32 @@ func (r *RootNode) OnAdd(ctx context.Context) {
 		Ino:  stableIno("log"),
 	})
 	r.AddChild("log", logInode, true)
+
+	searchDir := &SearchRootDir{repo: r.repo}
+	searchInode := r.NewPersistentInode(ctx, searchDir, fs.StableAttr{
+		Mode: syscall.S_IFDIR,
+		Ino:  stableIno("search"),
+	})
+	r.AddChild("search", searchInode, true)
+
+	relatedDir := &RelatedRootDir{repo: r.repo}
+	relatedInode := r.NewPersistentInode(ctx, relatedDir, fs.StableAttr{
+		Mode: syscall.S_IFDIR,
+		Ino:  stableIno("related"),
+	})
+	r.AddChild("related", relatedInode, true)
+
+	lensesDir := &LensesRootDir{repo: r.repo}
+	lensesInode := r.NewPersistentInode(ctx, lensesDir, fs.StableAttr{
+		Mode: syscall.S_IFDIR,
+		Ino:  stableIno("lenses"),
+	})
+	r.AddChild("lenses", lensesInode, true)
+
+	// Wire co-access callback: access log → co-access index
+	r.accessLog.OnAccess = func(nodeID string, ts time.Time) {
+		r.repo.CoAccess.Record(nodeID, ts)
+	}
 }
 
 func (r *RootNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
