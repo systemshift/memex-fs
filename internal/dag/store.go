@@ -10,6 +10,9 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
+// CidUndef is the undefined/zero CID value, exported for use by other packages.
+var CidUndef = gocid.Undef
+
 // ObjectStore manages CID-addressed immutable objects on disk.
 type ObjectStore struct {
 	dir string // path to objects/ directory

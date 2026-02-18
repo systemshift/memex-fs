@@ -2,6 +2,7 @@ package fuse
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -10,17 +11,20 @@ import (
 	"github.com/systemshift/memex-fs/internal/dag"
 )
 
-// RootNode is the mountpoint directory. Contains "nodes/" and "types/".
+// RootNode is the mountpoint directory. Contains "nodes/", "types/", and "log/".
 type RootNode struct {
 	fs.Inode
-	repo *dag.Repository
+	repo      *dag.Repository
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeOnAdder)((*RootNode)(nil))
 var _ = (fs.NodeGetattrer)((*RootNode)(nil))
 
 func (r *RootNode) OnAdd(ctx context.Context) {
-	nodesDir := &NodesDir{repo: r.repo}
+	r.accessLog = NewAccessLog(filepath.Join(r.repo.MxDir(), "access.jsonl"))
+
+	nodesDir := &NodesDir{repo: r.repo, accessLog: r.accessLog}
 	nodesInode := r.NewPersistentInode(ctx, nodesDir, fs.StableAttr{
 		Mode: syscall.S_IFDIR,
 		Ino:  stableIno("nodes"),
@@ -33,6 +37,13 @@ func (r *RootNode) OnAdd(ctx context.Context) {
 		Ino:  stableIno("types"),
 	})
 	r.AddChild("types", typesInode, true)
+
+	logDir := &LogDir{repo: r.repo}
+	logInode := r.NewPersistentInode(ctx, logDir, fs.StableAttr{
+		Mode: syscall.S_IFDIR,
+		Ino:  stableIno("log"),
+	})
+	r.AddChild("log", logInode, true)
 }
 
 func (r *RootNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
@@ -44,7 +55,8 @@ func (r *RootNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 // NodesDir lists all non-deleted nodes. mkdir creates, rmdir deletes.
 type NodesDir struct {
 	fs.Inode
-	repo *dag.Repository
+	repo      *dag.Repository
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeLookuper)((*NodesDir)(nil))
@@ -80,7 +92,7 @@ func (n *NodesDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
-	nodeDir := &NodeDir{repo: n.repo, nodeID: name}
+	nodeDir := &NodeDir{repo: n.repo, nodeID: name, accessLog: n.accessLog}
 	child := n.NewInode(ctx, nodeDir, fs.StableAttr{
 		Mode: syscall.S_IFDIR,
 		Ino:  stableIno("nodes/" + name),
@@ -101,7 +113,7 @@ func (n *NodesDir) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 		return nil, syscall.EEXIST
 	}
 
-	nodeDir := &NodeDir{repo: n.repo, nodeID: name}
+	nodeDir := &NodeDir{repo: n.repo, nodeID: name, accessLog: n.accessLog}
 	child := n.NewInode(ctx, nodeDir, fs.StableAttr{
 		Mode: syscall.S_IFDIR,
 		Ino:  stableIno("nodes/" + name),

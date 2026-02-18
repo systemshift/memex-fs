@@ -12,11 +12,12 @@ import (
 
 // Repository is the top-level facade for the Merkle DAG store.
 type Repository struct {
-	root   string
-	Store  *ObjectStore
-	Refs   *RefStore
-	Links  *LinkIndex
-	Search *SearchIndex
+	root    string
+	Store   *ObjectStore
+	Refs    *RefStore
+	Links   *LinkIndex
+	Search  *SearchIndex
+	Commits *CommitLog
 }
 
 // OpenRepository opens or creates a repository at the given path.
@@ -61,13 +62,15 @@ func OpenRepository(root string) (*Repository, error) {
 	}
 
 	search := NewSearchIndex()
+	commits := NewCommitLog(filepath.Join(mxDir, "HEAD"), store)
 
 	repo := &Repository{
-		root:   root,
-		Store:  store,
-		Refs:   refs,
-		Links:  links,
-		Search: search,
+		root:    root,
+		Store:   store,
+		Refs:    refs,
+		Links:   links,
+		Search:  search,
+		Commits: commits,
 	}
 
 	// Rebuild search index from all refs
@@ -76,6 +79,19 @@ func OpenRepository(root string) (*Repository, error) {
 	}
 
 	return repo, nil
+}
+
+// MxDir returns the path to the .mx/ data directory.
+func (r *Repository) MxDir() string {
+	return filepath.Join(r.root, ".mx")
+}
+
+// commit is a helper that creates a commit after a mutation.
+// Failures are logged but do not propagate — commits are metadata, not essential.
+func (r *Repository) commit(message string) {
+	if _, err := r.Commits.Commit(r.Refs, r.Links, message); err != nil {
+		fmt.Printf("memex-fs: commit warning: %v\n", err)
+	}
 }
 
 // rebuildSearchIndex scans all refs and indexes every node.
@@ -141,6 +157,7 @@ func (r *Repository) CreateNode(id, typ string, content []byte, meta map[string]
 	}
 
 	r.Search.IndexNode(id, node)
+	r.commit("create " + id)
 	return node, nil
 }
 
@@ -230,6 +247,7 @@ func (r *Repository) UpdateNode(id string, metaUpdates map[string]interface{}) (
 
 	r.Search.RemoveNode(id)
 	r.Search.IndexNode(id, node)
+	r.commit("update meta " + id)
 	return node, nil
 }
 
@@ -238,7 +256,11 @@ func (r *Repository) DeleteNode(id string, force bool) error {
 	if force {
 		// Hard delete: just remove the ref
 		r.Search.RemoveNode(id)
-		return r.Refs.Delete(id)
+		if err := r.Refs.Delete(id); err != nil {
+			return err
+		}
+		r.commit("delete " + id)
+		return nil
 	}
 
 	current, err := r.getNodeEnvelope(id)
@@ -274,6 +296,7 @@ func (r *Repository) DeleteNode(id string, force bool) error {
 	}
 
 	r.Search.RemoveNode(id)
+	r.commit("delete " + id)
 	return nil
 }
 
@@ -317,12 +340,17 @@ func (r *Repository) UpdateContent(id string, content []byte) (*NodeEnvelope, er
 
 	r.Search.RemoveNode(id)
 	r.Search.IndexNode(id, node)
+	r.commit("update content " + id)
 	return node, nil
 }
 
 // CreateLink creates a link between two nodes.
 func (r *Repository) CreateLink(source, target, linkType string) error {
-	return r.Links.Add(LinkEntry{Source: source, Target: target, Type: linkType})
+	if err := r.Links.Add(LinkEntry{Source: source, Target: target, Type: linkType}); err != nil {
+		return err
+	}
+	r.commit(fmt.Sprintf("link %s -[%s]-> %s", source, linkType, target))
+	return nil
 }
 
 // GetLinks returns all links involving the given node.
@@ -350,6 +378,7 @@ func (r *Repository) Ingest(content string, format string) (string, bool, error)
 	if err != nil {
 		return "", false, err
 	}
+	// CreateNode already commits, but with "create {id}" — that's fine for ingest too
 	return id, true, nil
 }
 

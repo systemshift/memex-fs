@@ -16,8 +16,9 @@ import (
 // Contains: content, meta.json, type, links/
 type NodeDir struct {
 	fs.Inode
-	repo   *dag.Repository
-	nodeID string
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeLookuper)((*NodeDir)(nil))
@@ -43,7 +44,7 @@ func (d *NodeDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	switch name {
 	case "content":
-		f := &ContentFile{repo: d.repo, nodeID: d.nodeID}
+		f := &ContentFile{repo: d.repo, nodeID: d.nodeID, accessLog: d.accessLog}
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFREG,
 			Ino:  stableIno("nodes/" + d.nodeID + "/content"),
@@ -51,7 +52,7 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		return child, fs.OK
 
 	case "meta.json":
-		f := &MetaFile{repo: d.repo, nodeID: d.nodeID}
+		f := &MetaFile{repo: d.repo, nodeID: d.nodeID, accessLog: d.accessLog}
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFREG,
 			Ino:  stableIno("nodes/" + d.nodeID + "/meta.json"),
@@ -59,7 +60,7 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		return child, fs.OK
 
 	case "type":
-		f := &TypeFile{repo: d.repo, nodeID: d.nodeID}
+		f := &TypeFile{repo: d.repo, nodeID: d.nodeID, accessLog: d.accessLog}
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFREG,
 			Ino:  stableIno("nodes/" + d.nodeID + "/type"),
@@ -67,7 +68,7 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		return child, fs.OK
 
 	case "links":
-		f := &LinksDir{repo: d.repo, nodeID: d.nodeID}
+		f := &LinksDir{repo: d.repo, nodeID: d.nodeID, accessLog: d.accessLog}
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFDIR,
 			Ino:  stableIno("nodes/" + d.nodeID + "/links"),
@@ -82,8 +83,9 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 // ContentFile exposes a node's content as a readable/writable file.
 type ContentFile struct {
 	fs.Inode
-	repo   *dag.Repository
-	nodeID string
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeGetattrer)((*ContentFile)(nil))
@@ -124,6 +126,9 @@ func (f *ContentFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, o
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
+	if f.accessLog != nil {
+		f.accessLog.Log(f.nodeID, "content")
+	}
 	data := node.Content
 	if off >= int64(len(data)) {
 		return fuse.ReadResultData(nil), fs.OK
@@ -138,8 +143,9 @@ func (f *ContentFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, o
 // MetaFile exposes a node's metadata as JSON.
 type MetaFile struct {
 	fs.Inode
-	repo   *dag.Repository
-	nodeID string
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeGetattrer)((*MetaFile)(nil))
@@ -195,6 +201,9 @@ func (f *MetaFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off 
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
+	if f.accessLog != nil {
+		f.accessLog.Log(f.nodeID, "meta")
+	}
 	if off >= int64(len(data)) {
 		return fuse.ReadResultData(nil), fs.OK
 	}
@@ -208,8 +217,9 @@ func (f *MetaFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off 
 // TypeFile exposes a node's type as a read-only file.
 type TypeFile struct {
 	fs.Inode
-	repo   *dag.Repository
-	nodeID string
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeGetattrer)((*TypeFile)(nil))
@@ -236,6 +246,9 @@ func (f *TypeFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off 
 	if err != nil {
 		return nil, syscall.ENOENT
 	}
+	if f.accessLog != nil {
+		f.accessLog.Log(f.nodeID, "type")
+	}
 	data := []byte(node.Type + "\n")
 	if off >= int64(len(data)) {
 		return fuse.ReadResultData(nil), fs.OK
@@ -250,8 +263,9 @@ func (f *TypeFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, off 
 // LinksDir lists links from a node as symlinks.
 type LinksDir struct {
 	fs.Inode
-	repo   *dag.Repository
-	nodeID string
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
 }
 
 var _ = (fs.NodeLookuper)((*LinksDir)(nil))
@@ -266,6 +280,9 @@ func (d *LinksDir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr
 }
 
 func (d *LinksDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	if d.accessLog != nil {
+		d.accessLog.Log(d.nodeID, "links")
+	}
 	links := d.repo.GetLinks(d.nodeID)
 	var entries []fuse.DirEntry
 	for _, l := range links {
