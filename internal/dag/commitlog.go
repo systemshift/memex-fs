@@ -16,11 +16,12 @@ import (
 type CommitLog struct {
 	headPath string
 	store    *ObjectStore
+	author   string // DID of the local identity, stamped on every commit
 }
 
 // NewCommitLog creates a CommitLog that reads/writes HEAD from headPath.
-func NewCommitLog(headPath string, store *ObjectStore) *CommitLog {
-	return &CommitLog{headPath: headPath, store: store}
+func NewCommitLog(headPath string, store *ObjectStore, author string) *CommitLog {
+	return &CommitLog{headPath: headPath, store: store, author: author}
 }
 
 // Head returns the CID of the current HEAD commit, or gocid.Undef if none.
@@ -84,6 +85,7 @@ func (cl *CommitLog) Commit(refs *RefStore, links *LinkIndex, message string) (g
 	commit := &CommitObject{
 		V:         1,
 		Parent:    parent,
+		Author:    cl.author,
 		Timestamp: time.Now().UTC(),
 		Refs:      refsMap,
 		Links:     allLinks,

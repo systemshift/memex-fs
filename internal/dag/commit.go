@@ -7,6 +7,7 @@ import "time"
 type CommitObject struct {
 	V         int               `json:"v"`
 	Parent    string            `json:"parent,omitempty"` // CID (base32) of previous commit
+	Author    string            `json:"author,omitempty"` // DID of the committer
 	Timestamp time.Time         `json:"timestamp"`
 	Refs      map[string]string `json:"refs"`  // id → CID (base32)
 	Links     []LinkEntry       `json:"links"` // sorted snapshot of all links

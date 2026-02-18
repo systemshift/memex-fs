@@ -70,7 +70,16 @@ func OpenRepository(root string) (*Repository, error) {
 	}
 
 	search := NewSearchIndex()
-	commits := NewCommitLog(filepath.Join(mxDir, "HEAD"), store)
+
+	// Load shared identity for commit authorship
+	author := ""
+	if id, err := LoadIdentity(); err != nil {
+		fmt.Printf("memex-fs: identity warning: %v\n", err)
+	} else {
+		author = id.DID
+	}
+
+	commits := NewCommitLog(filepath.Join(mxDir, "HEAD"), store, author)
 
 	// Build advisory indexes (failures are warnings, not fatal)
 	accessLogPath := filepath.Join(mxDir, "access.jsonl")
