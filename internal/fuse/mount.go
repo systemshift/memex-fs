@@ -4,12 +4,14 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	gofuse "github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/systemshift/memex-fs/internal/dag"
+	"github.com/systemshift/memex-fs/internal/dagit"
 )
 
 // MountFS mounts the FUSE filesystem at mountpoint backed by repo.
 // Returns the server (call server.Wait() to block, server.Unmount() to stop).
-func MountFS(mountpoint string, repo *dag.Repository) (*gofuse.Server, error) {
-	root := &RootNode{repo: repo}
+// feedManager may be nil to disable /feeds/.
+func MountFS(mountpoint string, repo *dag.Repository, feedManager *dagit.FeedManager) (*gofuse.Server, error) {
+	root := &RootNode{repo: repo, feedManager: feedManager}
 
 	opts := &fs.Options{
 		MountOptions: gofuse.MountOptions{

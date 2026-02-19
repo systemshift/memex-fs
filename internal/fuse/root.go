@@ -10,13 +10,15 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/systemshift/memex-fs/internal/dag"
+	"github.com/systemshift/memex-fs/internal/dagit"
 )
 
-// RootNode is the mountpoint directory. Contains "nodes/", "types/", and "log/".
+// RootNode is the mountpoint directory. Contains "nodes/", "types/", "log/", "feeds/", etc.
 type RootNode struct {
 	fs.Inode
-	repo      *dag.Repository
-	accessLog *AccessLog
+	repo        *dag.Repository
+	feedManager *dagit.FeedManager
+	accessLog   *AccessLog
 }
 
 var _ = (fs.NodeOnAdder)((*RootNode)(nil))
@@ -66,6 +68,16 @@ func (r *RootNode) OnAdd(ctx context.Context) {
 		Ino:  stableIno("lenses"),
 	})
 	r.AddChild("lenses", lensesInode, true)
+
+	// Mount /feeds/ if feed manager is available
+	if r.feedManager != nil {
+		feedsDir := &FeedsDir{fm: r.feedManager}
+		feedsInode := r.NewPersistentInode(ctx, feedsDir, fs.StableAttr{
+			Mode: syscall.S_IFDIR,
+			Ino:  stableIno("feeds"),
+		})
+		r.AddChild("feeds", feedsInode, true)
+	}
 
 	// Wire co-access callback: access log → co-access index
 	r.accessLog.OnAccess = func(nodeID string, ts time.Time) {

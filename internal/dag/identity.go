@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const identityRelPath = ".config/memex/identity.json"
@@ -93,6 +94,58 @@ func generateIdentity(path string) (*Identity, error) {
 	fmt.Printf("memex-fs: generated new identity %s\n", did)
 	fmt.Printf("memex-fs: stored at %s\n", path)
 	return id, nil
+}
+
+// DecodeDIDKey decodes a did:key:z... string to a raw 32-byte Ed25519 public key.
+func DecodeDIDKey(did string) ([]byte, error) {
+	if !strings.HasPrefix(did, "did:key:z") {
+		return nil, fmt.Errorf("invalid did:key format: %s", did)
+	}
+	encoded := did[9:] // strip "did:key:z"
+
+	// Base58btc decode
+	num := new(big.Int)
+	for _, c := range encoded {
+		idx := strings.IndexRune(base58Alphabet, c)
+		if idx < 0 {
+			return nil, fmt.Errorf("invalid base58 character: %c", c)
+		}
+		num.Mul(num, big.NewInt(58))
+		num.Add(num, big.NewInt(int64(idx)))
+	}
+
+	// Convert to 34 bytes (2 prefix + 32 key)
+	prefixed := num.Bytes()
+	// Pad to 34 bytes if needed
+	if len(prefixed) < 34 {
+		padded := make([]byte, 34)
+		copy(padded[34-len(prefixed):], prefixed)
+		prefixed = padded
+	}
+
+	if len(prefixed) < 2 || prefixed[0] != 0xed || prefixed[1] != 0x01 {
+		return nil, fmt.Errorf("invalid multicodec prefix for Ed25519 key")
+	}
+
+	return prefixed[2:], nil
+}
+
+// SigningKey returns the Ed25519 private key from the identity's seed.
+func (id *Identity) SigningKey() (ed25519.PrivateKey, error) {
+	seed, err := base64.StdEncoding.DecodeString(id.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode private key: %w", err)
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+// VerifyKey returns the Ed25519 public key from the identity.
+func (id *Identity) VerifyKey() (ed25519.PublicKey, error) {
+	pub, err := base64.StdEncoding.DecodeString(id.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("decode public key: %w", err)
+	}
+	return ed25519.PublicKey(pub), nil
 }
 
 // encodeDIDKey encodes a raw Ed25519 public key as did:key:z... using

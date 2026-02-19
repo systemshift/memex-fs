@@ -37,6 +37,7 @@ func OpenRepository(root string) (*Repository, error) {
 		mxDir,
 		filepath.Join(mxDir, "objects"),
 		filepath.Join(mxDir, "refs"),
+		filepath.Join(mxDir, "dagit"),
 	} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
