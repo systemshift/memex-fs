@@ -20,6 +20,7 @@ func main() {
 		kuboAPI      string
 		feedInterval string
 		noFeeds      bool
+		debug        bool
 	)
 
 	flag.StringVar(&dataDir, "data", ".", "Data directory (contains .mx/)")
@@ -27,6 +28,7 @@ func main() {
 	flag.StringVar(&kuboAPI, "kubo-api", "http://localhost:5001/api/v0", "Kubo API URL")
 	flag.StringVar(&feedInterval, "feed-interval", "5m", "Background feed sync interval")
 	flag.BoolVar(&noFeeds, "no-feeds", false, "Disable feeds/dagit integration")
+	flag.BoolVar(&debug, "debug", false, "Enable FUSE debug logging")
 	flag.Parse()
 
 	if mountpoint == "" {
@@ -77,7 +79,7 @@ func main() {
 	}
 
 	log.Printf("memex-fs: mounting at %s", mountpoint)
-	server, err := memexfuse.MountFS(mountpoint, repo, fm)
+	server, err := memexfuse.MountFS(mountpoint, repo, fm, debug)
 	if err != nil {
 		log.Fatalf("memex-fs: mount failed: %v", err)
 	}

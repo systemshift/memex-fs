@@ -384,12 +384,17 @@ type WriteHandle struct {
 	buf    []byte
 }
 
+const maxWriteSize = 64 << 20 // 64 MB
+
 var _ = (fs.FileWriter)((*WriteHandle)(nil))
 var _ = (fs.FileFlusher)((*WriteHandle)(nil))
 
 func (h *WriteHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	// Extend buffer if needed
 	end := int(off) + len(data)
+	if end > maxWriteSize {
+		return 0, syscall.EFBIG
+	}
+	// Extend buffer if needed
 	if end > len(h.buf) {
 		newBuf := make([]byte, end)
 		copy(newBuf, h.buf)

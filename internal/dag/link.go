@@ -71,14 +71,8 @@ func (idx *LinkIndex) Add(entry LinkEntry) error {
 	}
 
 	// Append to journal
-	f, err := os.OpenFile(idx.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open link journal for append: %w", err)
-	}
 	data, _ := json.Marshal(entry)
-	_, err = f.Write(append(data, '\n'))
-	f.Close()
-	if err != nil {
+	if err := SafeAppend(idx.path, append(data, '\n')); err != nil {
 		return fmt.Errorf("write link entry: %w", err)
 	}
 

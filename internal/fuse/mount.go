@@ -10,7 +10,7 @@ import (
 // MountFS mounts the FUSE filesystem at mountpoint backed by repo.
 // Returns the server (call server.Wait() to block, server.Unmount() to stop).
 // feedManager may be nil to disable /feeds/.
-func MountFS(mountpoint string, repo *dag.Repository, feedManager *dagit.FeedManager) (*gofuse.Server, error) {
+func MountFS(mountpoint string, repo *dag.Repository, feedManager *dagit.FeedManager, debug bool) (*gofuse.Server, error) {
 	root := &RootNode{repo: repo, feedManager: feedManager}
 
 	opts := &fs.Options{
@@ -18,7 +18,8 @@ func MountFS(mountpoint string, repo *dag.Repository, feedManager *dagit.FeedMan
 			FsName:        "memex",
 			Name:          "memex",
 			DisableXAttrs: true,
-			Debug:         true,
+			AllowOther:    false,
+			Debug:         debug,
 		},
 	}
 

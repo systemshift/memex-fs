@@ -432,7 +432,7 @@ func (fm *FeedManager) saveFollowing(entries []FollowEntry) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(fm.followingPath(), data, 0644)
+	return dag.SafeWrite(fm.followingPath(), data, 0644)
 }
 
 func (fm *FeedManager) loadFeedIndex() (*FeedIndex, error) {
@@ -455,5 +455,5 @@ func (fm *FeedManager) saveFeedIndex(feed *FeedIndex) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(fm.feedIndexPath(), data, 0644)
+	return dag.SafeWrite(fm.feedIndexPath(), data, 0644)
 }

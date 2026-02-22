@@ -37,7 +37,7 @@ func refIDFromFilename(name string) string {
 func (r *RefStore) Set(id string, c gocid.Cid) error {
 	path := filepath.Join(r.dir, refFilename(id))
 	encoded, _ := multibase.Encode(multibase.Base32, c.Bytes())
-	return os.WriteFile(path, []byte(encoded), 0644)
+	return SafeWrite(path, []byte(encoded), 0644)
 }
 
 // Get resolves a human-readable ID to a CID.

@@ -52,7 +52,7 @@ func (s *ObjectStore) Put(data []byte) (gocid.Cid, error) {
 	if _, err := os.Stat(path); err == nil {
 		return c, nil // already exists
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := SafeWrite(path, data, 0644); err != nil {
 		return gocid.Undef, fmt.Errorf("write object: %w", err)
 	}
 	return c, nil

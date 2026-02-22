@@ -104,7 +104,7 @@ func (cl *CommitLog) Commit(refs *RefStore, links *LinkIndex, message string) (g
 
 	// 6. Update HEAD
 	encoded := CIDToFilename(c)
-	if err := os.WriteFile(cl.headPath, []byte(encoded+"\n"), 0644); err != nil {
+	if err := SafeWrite(cl.headPath, []byte(encoded+"\n"), 0644); err != nil {
 		return gocid.Undef, fmt.Errorf("write HEAD: %w", err)
 	}
 

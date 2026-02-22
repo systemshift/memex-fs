@@ -2,9 +2,11 @@ package fuse
 
 import (
 	"encoding/json"
-	"os"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/systemshift/memex-fs/internal/dag"
 )
 
 // AccessEntry is a single read-access record.
@@ -38,15 +40,14 @@ func (a *AccessLog) Log(nodeID, field string) {
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
+		log.Printf("memex-fs: access log marshal: %v", err)
 		return
 	}
 
-	f, err := os.OpenFile(a.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
+	if err := dag.SafeAppend(a.path, append(data, '\n')); err != nil {
+		log.Printf("memex-fs: access log write: %v", err)
 		return
 	}
-	f.Write(append(data, '\n'))
-	f.Close()
 
 	if a.OnAccess != nil {
 		ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
