@@ -354,6 +354,19 @@ func (fm *FeedManager) IngestPost(post *Post, ipfsCID string) {
 	_, err := fm.repo.CreateNode(nodeID, "Post", []byte(post.Content), meta)
 	if err != nil {
 		log.Printf("memex-fs: ingest post %s: %v", nodeID, err)
+		return
+	}
+
+	// Wire refs into the graph as links
+	for _, refCID := range post.Refs {
+		refShort := refCID
+		if len(refShort) > 16 {
+			refShort = refShort[:16]
+		}
+		targetID := "post:" + refShort
+		if err := fm.repo.CreateLink(nodeID, targetID, "references"); err != nil {
+			log.Printf("memex-fs: link %s -> %s: %v", nodeID, targetID, err)
+		}
 	}
 }
 
