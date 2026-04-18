@@ -69,6 +69,13 @@ func (r *RootNode) OnAdd(ctx context.Context) {
 	})
 	r.AddChild("at", atInode, true)
 
+	emergentDir := &EmergentRootDir{repo: r.repo}
+	emergentInode := r.NewPersistentInode(ctx, emergentDir, fs.StableAttr{
+		Mode: syscall.S_IFDIR,
+		Ino:  stableIno("emergent"),
+	})
+	r.AddChild("emergent", emergentInode, true)
+
 	lensesDir := &LensesRootDir{repo: r.repo}
 	lensesInode := r.NewPersistentInode(ctx, lensesDir, fs.StableAttr{
 		Mode: syscall.S_IFDIR,

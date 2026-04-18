@@ -27,6 +27,7 @@ type Repository struct {
 	CoChange    *CoChangeIndex
 	Relatedness *RelatednessIndex
 	Neighbors   *NeighborsIndex
+	Emergent    *EmergentIndex
 }
 
 // OpenRepository opens or creates a repository at the given path.
@@ -104,6 +105,7 @@ func OpenRepository(root string) (*Repository, error) {
 		Relatedness: relatedness,
 	}
 	repo.Neighbors = NewNeighborsIndex(links, search, coChange, coAccess, repo)
+	repo.Emergent = NewEmergentIndex(repo.Neighbors, refs)
 
 	// Rebuild search index from all refs
 	if err := repo.rebuildSearchIndex(); err != nil {
