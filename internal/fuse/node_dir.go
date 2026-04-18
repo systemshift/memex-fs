@@ -39,6 +39,7 @@ func (d *NodeDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		{Name: "links", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/links")},
 		{Name: "backlinks", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/backlinks")},
 		{Name: "neighbors", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/neighbors")},
+		{Name: "blocks", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/blocks")},
 	}
 	return fs.NewListDirStream(entries), fs.OK
 }
@@ -90,6 +91,14 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFDIR,
 			Ino:  stableIno("nodes/" + d.nodeID + "/neighbors"),
+		})
+		return child, fs.OK
+
+	case "blocks":
+		f := &BlocksDir{repo: d.repo, nodeID: d.nodeID}
+		child := d.NewInode(ctx, f, fs.StableAttr{
+			Mode: syscall.S_IFDIR,
+			Ino:  stableIno("nodes/" + d.nodeID + "/blocks"),
 		})
 		return child, fs.OK
 
