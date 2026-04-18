@@ -105,6 +105,60 @@ func (k *KuboClient) Pin(cid string) error {
 	return nil
 }
 
+// BlockPut stores raw bytes as an IPLD block using the given codec and
+// multihash type. The returned CID preserves the input — no unixfs wrapping
+// — so CIDs computed by memex-fs (CIDv1, raw codec, sha2-256) round-trip
+// through IPFS unchanged. This is the primitive behind memex-fs push.
+func (k *KuboClient) BlockPut(data []byte, cidCodec, mhType string) (string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	part, err := w.CreateFormFile("data", "block")
+	if err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", fmt.Errorf("write form data: %w", err)
+	}
+	w.Close()
+
+	url := fmt.Sprintf("%s/block/put?cid-codec=%s&mhtype=%s", k.apiURL, cidCodec, mhType)
+	resp, err := k.client.Post(url, w.FormDataContentType(), &buf)
+	if err != nil {
+		return "", fmt.Errorf("ipfs block/put: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ipfs block/put: status %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Key string `json:"Key"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("ipfs block/put: parse response: %w", err)
+	}
+	return result.Key, nil
+}
+
+// BlockGet fetches the raw bytes of an IPLD block by CID. The bytes are
+// returned exactly as stored — no unixfs unwrapping — so they can be fed
+// back into memex-fs's ObjectStore under the same CID.
+func (k *KuboClient) BlockGet(cid string) ([]byte, error) {
+	resp, err := k.client.Post(k.apiURL+"/block/get?arg="+cid, "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("ipfs block/get: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ipfs block/get: status %d: %s", resp.StatusCode, body)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // KeyList lists all keys in the Kubo keystore.
 func (k *KuboClient) KeyList() ([]KeyInfo, error) {
 	resp, err := k.client.Post(k.apiURL+"/key/list", "", nil)
