@@ -37,6 +37,8 @@ func (d *NodeDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		{Name: "meta.json", Mode: syscall.S_IFREG, Ino: stableIno("nodes/" + d.nodeID + "/meta.json")},
 		{Name: "type", Mode: syscall.S_IFREG, Ino: stableIno("nodes/" + d.nodeID + "/type")},
 		{Name: "links", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/links")},
+		{Name: "backlinks", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/backlinks")},
+		{Name: "neighbors", Mode: syscall.S_IFDIR, Ino: stableIno("nodes/" + d.nodeID + "/neighbors")},
 	}
 	return fs.NewListDirStream(entries), fs.OK
 }
@@ -72,6 +74,22 @@ func (d *NodeDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		child := d.NewInode(ctx, f, fs.StableAttr{
 			Mode: syscall.S_IFDIR,
 			Ino:  stableIno("nodes/" + d.nodeID + "/links"),
+		})
+		return child, fs.OK
+
+	case "backlinks":
+		f := &BacklinksDir{repo: d.repo, nodeID: d.nodeID, accessLog: d.accessLog}
+		child := d.NewInode(ctx, f, fs.StableAttr{
+			Mode: syscall.S_IFDIR,
+			Ino:  stableIno("nodes/" + d.nodeID + "/backlinks"),
+		})
+		return child, fs.OK
+
+	case "neighbors":
+		f := &NeighborsDir{repo: d.repo, nodeID: d.nodeID}
+		child := d.NewInode(ctx, f, fs.StableAttr{
+			Mode: syscall.S_IFDIR,
+			Ino:  stableIno("nodes/" + d.nodeID + "/neighbors"),
 		})
 		return child, fs.OK
 
@@ -355,6 +373,63 @@ func (d *LinksDir) Symlink(ctx context.Context, pointedTo string, name string, o
 		Ino:  stableIno("nodes/" + d.nodeID + "/links/" + name),
 	})
 	return child, fs.OK
+}
+
+// BacklinksDir lists links pointing AT this node (incoming) as symlinks.
+// Name format: "{linkType}:{sourceID}" — points back to the source node.
+type BacklinksDir struct {
+	fs.Inode
+	repo      *dag.Repository
+	nodeID    string
+	accessLog *AccessLog
+}
+
+var _ = (fs.NodeLookuper)((*BacklinksDir)(nil))
+var _ = (fs.NodeReaddirer)((*BacklinksDir)(nil))
+var _ = (fs.NodeGetattrer)((*BacklinksDir)(nil))
+
+func (d *BacklinksDir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	out.Mode = 0555
+	out.Ino = stableIno("nodes/" + d.nodeID + "/backlinks")
+	return fs.OK
+}
+
+func (d *BacklinksDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	if d.accessLog != nil {
+		d.accessLog.Log(d.nodeID, "backlinks")
+	}
+	links := d.repo.Links.LinksTo(d.nodeID)
+	var entries []fuse.DirEntry
+	for _, l := range links {
+		name := l.Type + ":" + l.Source
+		entries = append(entries, fuse.DirEntry{
+			Name: name,
+			Mode: syscall.S_IFLNK,
+			Ino:  stableIno("nodes/" + d.nodeID + "/backlinks/" + name),
+		})
+	}
+	return fs.NewListDirStream(entries), fs.OK
+}
+
+func (d *BacklinksDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	idx := strings.Index(name, ":")
+	if idx < 0 {
+		return nil, syscall.ENOENT
+	}
+	linkType := name[:idx]
+	source := name[idx+1:]
+
+	for _, l := range d.repo.Links.LinksTo(d.nodeID) {
+		if l.Type == linkType && l.Source == source {
+			sym := &LinkSymlink{target: "../../" + source}
+			child := d.NewInode(ctx, sym, fs.StableAttr{
+				Mode: syscall.S_IFLNK,
+				Ino:  stableIno("nodes/" + d.nodeID + "/backlinks/" + name),
+			})
+			return child, fs.OK
+		}
+	}
+	return nil, syscall.ENOENT
 }
 
 // LinkSymlink is a single symlink in the links/ directory.

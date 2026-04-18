@@ -124,6 +124,64 @@ func (cl *CommitLog) GetCommit(c gocid.Cid) (*CommitObject, error) {
 	return &commit, nil
 }
 
+// Resolve accepts either a base32 CID string or an RFC3339 timestamp and
+// returns the matching commit. For a timestamp, it walks the commit chain
+// and returns the newest commit whose Timestamp is <= the requested time.
+// Returns an error if nothing matches (e.g. timestamp is before the first
+// commit, or CID is unknown).
+func (cl *CommitLog) Resolve(key string) (*CommitObject, error) {
+	if t, err := time.Parse(time.RFC3339, key); err == nil {
+		return cl.resolveByTime(t)
+	}
+	if t, err := time.Parse(time.RFC3339Nano, key); err == nil {
+		return cl.resolveByTime(t)
+	}
+	return cl.resolveByCIDString(key)
+}
+
+func (cl *CommitLog) resolveByCIDString(key string) (*CommitObject, error) {
+	_, cidBytes, err := multibase.Decode(key)
+	if err != nil {
+		return nil, fmt.Errorf("not a valid CID or RFC3339 timestamp: %s", key)
+	}
+	c, err := gocid.Cast(cidBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse CID: %w", err)
+	}
+	return cl.GetCommit(c)
+}
+
+// resolveByTime walks backwards from HEAD and returns the newest commit
+// whose Timestamp is at or before t.
+func (cl *CommitLog) resolveByTime(t time.Time) (*CommitObject, error) {
+	head, err := cl.Head()
+	if err != nil || head == gocid.Undef {
+		return nil, fmt.Errorf("no commits yet")
+	}
+	current := head
+	for current != gocid.Undef {
+		commit, err := cl.GetCommit(current)
+		if err != nil {
+			return nil, err
+		}
+		if !commit.Timestamp.After(t) {
+			return commit, nil
+		}
+		if commit.Parent == "" {
+			break
+		}
+		_, cidBytes, err := multibase.Decode(commit.Parent)
+		if err != nil {
+			return nil, fmt.Errorf("decode parent CID: %w", err)
+		}
+		current, err = gocid.Cast(cidBytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse parent CID: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("no commit at or before %s", t.Format(time.RFC3339))
+}
+
 // Log walks the parent chain from HEAD, returning up to n commits (newest first).
 func (cl *CommitLog) Log(n int) ([]CommitObject, error) {
 	head, err := cl.Head()
