@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-	"time"
 
 	"github.com/systemshift/memex-fs/internal/dag"
 	"github.com/systemshift/memex-fs/internal/dagit"
@@ -54,12 +54,9 @@ Run 'memex-fs <command> -h' for command-specific flags.
 func runMount(args []string) {
 	fs := flag.NewFlagSet("mount", flag.ExitOnError)
 	var (
-		dataDir      = fs.String("data", ".", "Data directory (contains .mx/)")
-		mountpoint   = fs.String("mount", "", "FUSE mount point (required)")
-		kuboAPI      = fs.String("kubo-api", "http://localhost:5001/api/v0", "Kubo API URL")
-		feedInterval = fs.String("feed-interval", "5m", "Background feed sync interval")
-		noFeeds      = fs.Bool("no-feeds", false, "Disable feeds/dagit integration")
-		debug        = fs.Bool("debug", false, "Enable FUSE debug logging")
+		dataDir    = fs.String("data", ".", "Data directory (contains .mx/)")
+		mountpoint = fs.String("mount", "", "FUSE mount point (required)")
+		debug      = fs.Bool("debug", false, "Enable FUSE debug logging")
 	)
 	fs.Parse(args)
 
@@ -77,37 +74,8 @@ func runMount(args []string) {
 		log.Fatalf("memex-fs: failed to open repository: %v", err)
 	}
 
-	var fm *dagit.FeedManager
-	var syncer *dagit.FeedSyncer
-
-	if !*noFeeds {
-		identity, err := dag.LoadIdentity()
-		if err != nil {
-			log.Printf("memex-fs: identity warning: %v (feeds disabled)", err)
-		} else {
-			kubo := dagit.NewKuboClient(*kuboAPI)
-			fm = dagit.NewFeedManager(kubo, identity, repo)
-
-			if kubo.IsAvailable() {
-				if err := fm.EnsureKey(); err != nil {
-					log.Printf("memex-fs: key import warning: %v", err)
-				}
-			} else {
-				log.Printf("memex-fs: Kubo not available at %s (feeds will work when Kubo starts)", *kuboAPI)
-			}
-
-			interval, err := time.ParseDuration(*feedInterval)
-			if err != nil {
-				interval = 5 * time.Minute
-			}
-			syncer = dagit.NewFeedSyncer(fm, interval)
-			syncer.Start()
-			log.Printf("memex-fs: feed syncer started (interval %s)", interval)
-		}
-	}
-
 	log.Printf("memex-fs: mounting at %s", *mountpoint)
-	server, err := memexfuse.MountFS(*mountpoint, repo, fm, *debug)
+	server, err := memexfuse.MountFS(*mountpoint, repo, *debug)
 	if err != nil {
 		log.Fatalf("memex-fs: mount failed: %v", err)
 	}
@@ -118,9 +86,6 @@ func runMount(args []string) {
 	go func() {
 		<-done
 		log.Println("memex-fs: shutting down...")
-		if syncer != nil {
-			syncer.Stop()
-		}
 		server.Unmount()
 	}()
 
@@ -129,13 +94,17 @@ func runMount(args []string) {
 	log.Println("memex-fs: stopped")
 }
 
-// runPush uploads every object reachable from HEAD to IPFS. Prints the HEAD
-// CID on success so the user can share it (e.g. to a peer running pull).
+// runPush uploads every object reachable from HEAD to IPFS. With --publish
+// it also imports the repo's Ed25519 identity into the Kubo keystore (if
+// not already) and publishes the HEAD CID under an IPNS name derived from
+// the identity's DID. Prints the HEAD CID on success, and the IPNS name
+// when publishing.
 func runPush(args []string) {
 	fs := flag.NewFlagSet("push", flag.ExitOnError)
 	var (
 		dataDir = fs.String("data", ".", "Data directory (contains .mx/)")
 		kuboAPI = fs.String("kubo-api", "http://localhost:5001/api/v0", "Kubo API URL")
+		publish = fs.Bool("publish", false, "Publish HEAD CID over IPNS under the repo's identity")
 	)
 	fs.Parse(args)
 
@@ -154,11 +123,30 @@ func runPush(args []string) {
 		log.Fatalf("memex-fs push: %v", err)
 	}
 	fmt.Println(headCID)
+
+	if *publish {
+		identity, err := dag.LoadIdentity()
+		if err != nil {
+			log.Fatalf("memex-fs push: load identity: %v", err)
+		}
+		if err := dagit.EnsureKey(kubo, identity, dagit.HeadKeyName); err != nil {
+			log.Fatalf("memex-fs push: key import: %v", err)
+		}
+		if err := kubo.NamePublish(headCID, dagit.HeadKeyName); err != nil {
+			log.Fatalf("memex-fs push: IPNS publish: %v", err)
+		}
+		ipnsName, err := dagit.DIDToIPNSName(identity.DID)
+		if err != nil {
+			log.Fatalf("memex-fs push: derive IPNS name: %v", err)
+		}
+		fmt.Fprintf(os.Stderr, "memex-fs: published as ipns://%s (did %s)\n", ipnsName, identity.DID)
+	}
 }
 
-// runPull fetches a commit CID and everything reachable from it into the
-// local ObjectStore. Does not update refs or HEAD — browse the pulled
-// snapshot via /at/{cid}/ on a mounted repo.
+// runPull fetches a commit and everything reachable from it into the local
+// ObjectStore. Accepts either a commit CID (base32, e.g. bafk...) or a
+// did:key DID, which is resolved via IPNS to the DID holder's latest
+// published HEAD CID. Does not update refs or HEAD — browse via /at/{cid}/.
 func runPull(args []string) {
 	fs := flag.NewFlagSet("pull", flag.ExitOnError)
 	var (
@@ -168,9 +156,9 @@ func runPull(args []string) {
 	fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		log.Fatal("memex-fs pull: missing commit CID argument")
+		log.Fatal("memex-fs pull: missing CID or DID argument")
 	}
-	headCID := fs.Arg(0)
+	source := fs.Arg(0)
 
 	repo, err := dag.OpenRepository(*dataDir)
 	if err != nil {
@@ -180,6 +168,20 @@ func runPull(args []string) {
 	kubo := dagit.NewKuboClient(*kuboAPI)
 	if !kubo.IsAvailable() {
 		log.Fatalf("memex-fs pull: Kubo not available at %s", *kuboAPI)
+	}
+
+	headCID := source
+	if strings.HasPrefix(source, "did:key:") {
+		ipnsName, err := dagit.DIDToIPNSName(source)
+		if err != nil {
+			log.Fatalf("memex-fs pull: invalid DID: %v", err)
+		}
+		resolved, err := kubo.NameResolve(ipnsName)
+		if err != nil {
+			log.Fatalf("memex-fs pull: IPNS resolve: %v", err)
+		}
+		headCID = resolved
+		fmt.Fprintf(os.Stderr, "memex-fs: resolved %s -> %s\n", source, headCID)
 	}
 
 	if err := dagit.Pull(repo, kubo, headCID); err != nil {
