@@ -31,7 +31,9 @@ func NewSnapshot(commit *CommitObject, store *ObjectStore) *Snapshot {
 	reverse := make(map[string][]LinkEntry, len(commit.Links))
 	for _, l := range commit.Links {
 		forward[l.Source] = append(forward[l.Source], l)
-		reverse[l.Target] = append(reverse[l.Target], l)
+		// Mirror LinkIndex: reverse is keyed by the parent node so
+		// block-scoped targets surface as backlinks on the whole node.
+		reverse[LinkTargetParent(l.Target)] = append(reverse[LinkTargetParent(l.Target)], l)
 	}
 	return &Snapshot{
 		commit:  commit,
@@ -98,7 +100,8 @@ func (s *Snapshot) LinksFrom(id string) []LinkEntry {
 	return s.forward[id]
 }
 
-// LinksTo returns incoming links for a node as of this commit.
+// LinksTo returns incoming links for a node as of this commit, including
+// links whose target is a block of this node (target="id#b{n}").
 func (s *Snapshot) LinksTo(id string) []LinkEntry {
-	return s.reverse[id]
+	return s.reverse[LinkTargetParent(id)]
 }

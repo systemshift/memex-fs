@@ -5,8 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
+
+// LinkTargetParent returns the whole-node portion of a possibly-block-scoped
+// link target. Block targets use the suffix "#b{n}" — e.g. "paper:abc#b3"
+// is the third block of paper:abc. Backlink queries are indexed by this
+// parent so a link into a block surfaces as a backlink on the node.
+func LinkTargetParent(target string) string {
+	if i := strings.Index(target, "#"); i > 0 {
+		return target[:i]
+	}
+	return target
+}
 
 // LinkEntry is a single link record in the JSONL journal.
 type LinkEntry struct {
@@ -53,7 +65,9 @@ func (idx *LinkIndex) load() error {
 			continue // skip malformed lines
 		}
 		idx.forward[entry.Source] = append(idx.forward[entry.Source], entry)
-		idx.reverse[entry.Target] = append(idx.reverse[entry.Target], entry)
+		// Reverse map is keyed by the parent node so that block-scoped
+		// targets surface as backlinks on the whole node.
+		idx.reverse[LinkTargetParent(entry.Target)] = append(idx.reverse[LinkTargetParent(entry.Target)], entry)
 	}
 	return scanner.Err()
 }
@@ -77,7 +91,7 @@ func (idx *LinkIndex) Add(entry LinkEntry) error {
 	}
 
 	idx.forward[entry.Source] = append(idx.forward[entry.Source], entry)
-	idx.reverse[entry.Target] = append(idx.reverse[entry.Target], entry)
+	idx.reverse[LinkTargetParent(entry.Target)] = append(idx.reverse[LinkTargetParent(entry.Target)], entry)
 	return nil
 }
 
@@ -88,11 +102,12 @@ func (idx *LinkIndex) LinksFrom(id string) []LinkEntry {
 	return idx.forward[id]
 }
 
-// LinksTo returns all links where the given ID is the target.
+// LinksTo returns all links whose target resolves to id — i.e. target is
+// literally id, or a block-scoped target (id#b{n}) whose parent is id.
 func (idx *LinkIndex) LinksTo(id string) []LinkEntry {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	return idx.reverse[id]
+	return idx.reverse[LinkTargetParent(id)]
 }
 
 // AllLinks returns all links involving the given ID (as source or target).

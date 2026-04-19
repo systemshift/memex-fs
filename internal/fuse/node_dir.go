@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -328,8 +329,8 @@ func (d *LinksDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 func (d *LinksDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// name format: "linktype:targetid" e.g. "knows:person:bob"
-	// Parse: first segment before ":" is link type, rest is target
+	// name format: "linktype:targetid" e.g. "knows:person:bob" or
+	// "cites:paper:abc#b3" for a block-scoped link.
 	idx := strings.Index(name, ":")
 	if idx < 0 {
 		return nil, syscall.ENOENT
@@ -350,7 +351,7 @@ func (d *LinksDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		return nil, syscall.ENOENT
 	}
 
-	sym := &LinkSymlink{target: "../../" + target}
+	sym := &LinkSymlink{target: linkTargetPath(target)}
 	child := d.NewInode(ctx, sym, fs.StableAttr{
 		Mode: syscall.S_IFLNK,
 		Ino:  stableIno("nodes/" + d.nodeID + "/links/" + name),
@@ -359,7 +360,7 @@ func (d *LinksDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 }
 
 func (d *LinksDir) Symlink(ctx context.Context, pointedTo string, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// name format: "linktype:targetid"
+	// name format: "linktype:targetid", optionally with "#b{n}" suffix
 	idx := strings.Index(name, ":")
 	if idx < 0 {
 		return nil, syscall.EINVAL
@@ -367,8 +368,10 @@ func (d *LinksDir) Symlink(ctx context.Context, pointedTo string, name string, o
 	linkType := name[:idx]
 	target := name[idx+1:]
 
-	// Verify the target node exists
-	if _, err := d.repo.GetNode(target); err != nil {
+	// Verify the target NODE exists. Block-scoped targets (target#b3)
+	// are resolved to the parent node for the existence check; the link
+	// itself is stored with the full block-scoped target string.
+	if _, err := d.repo.GetNode(dag.LinkTargetParent(target)); err != nil {
 		return nil, syscall.ENOENT
 	}
 
@@ -376,12 +379,29 @@ func (d *LinksDir) Symlink(ctx context.Context, pointedTo string, name string, o
 		return nil, syscall.EIO
 	}
 
-	sym := &LinkSymlink{target: pointedTo}
+	// Ignore pointedTo: use the canonical form so ln -s through FUSE
+	// yields the same body that Lookup would produce on a later read.
+	_ = pointedTo
+	sym := &LinkSymlink{target: linkTargetPath(target)}
 	child := d.NewInode(ctx, sym, fs.StableAttr{
 		Mode: syscall.S_IFLNK,
 		Ino:  stableIno("nodes/" + d.nodeID + "/links/" + name),
 	})
 	return child, fs.OK
+}
+
+// linkTargetPath formats a link target (possibly #b{n}-suffixed) as a
+// symlink body relative to /nodes/{id}/links/. Plain node targets point
+// to ../../{id}; block targets point to ../../{parent}/blocks/b{4-padded}.
+// Malformed block suffixes fall back to the whole-node path.
+func linkTargetPath(target string) string {
+	if i := strings.Index(target, "#b"); i > 0 {
+		parent := target[:i]
+		if n, err := strconv.Atoi(target[i+2:]); err == nil && n > 0 {
+			return "../../" + parent + "/blocks/" + blockName(n)
+		}
+	}
+	return "../../" + target
 }
 
 // BacklinksDir lists links pointing AT this node (incoming) as symlinks.
